@@ -1,0 +1,4 @@
+# Copy this file to application-local.properties if you use a local override.
+# Put your real Groq key only in gitignored application.properties, never here.
+
+forgeflow.ai.groq.api-key=

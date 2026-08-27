@@ -1,0 +1,57 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: forgeflow-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: forgeflow
+      RABBITMQ_DEFAULT_PASS: forgeflow
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: forgeflow-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: forgeflow
+      POSTGRES_USER: forgeflow
+      POSTGRES_PASSWORD: forgeflow
+    volumes:
+      - forgeflow-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U forgeflow -d forgeflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: run the API in Docker after `docker compose up --build`
+  # Pass Groq: GROQ_API_KEY=gsk_xxx docker compose up --build
+  # App image: docker compose --profile full up --build
+  # Keep using .\mvnw.cmd spring-boot:run for daily work (profile off = only Rabbit + Postgres).
+  app:
+    profiles: ["full"]
+    build: .
+    container_name: forgeflow-app
+    ports:
+      - "8080:8080"
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/forgeflow
+      SPRING_DATASOURCE_USERNAME: forgeflow
+      SPRING_DATASOURCE_PASSWORD: forgeflow
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+volumes:
+  forgeflow-postgres-data:
