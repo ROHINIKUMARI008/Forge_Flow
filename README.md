@@ -1,8 +1,16 @@
 # ForgeFlow
 
-Backend workflow engine: HTTP APIs enqueue jobs, **RabbitMQ** workers run them, **PostgreSQL** stores status, **Groq** turns a English prompt into a job.
+Backend workflow engine split into two processes. **workflow-service** accepts HTTP calls, stores the job in **PostgreSQL**, and publishes to **RabbitMQ** after commit. **execution-worker** consumes the queue and updates job status. **Groq** turns an English prompt into a job inside the API process.
 
-This is a **backend-only** project. The client is Postman or curl. A UI is optional later and is not required for a resume.
+This is a **backend-only** project. The client is Postman or curl.
+
+## Layout
+
+| Module | Process | Role |
+| --- | --- | --- |
+| `forgeflow-common` | library, not a server | `JobEntity`, `WorkflowJobMessage`, RabbitMQ exchange/queue |
+| `workflow-service` | port 8080 | REST, Flyway, Groq, publish |
+| `execution-worker` | no HTTP port | consume, retry, mark completed or failed |
 
 ## Stack
 
@@ -11,28 +19,31 @@ Java 21, Spring Boot 4, RabbitMQ, PostgreSQL, Flyway, Docker Compose, Groq (`ope
 ## Run locally
 
 1. Docker Desktop running.
-2. Copy config and add your Groq key (never commit the key):
-
-```text
-copy src\main\resources\application.properties.example src\main\resources\application.properties
-```
-
-Set `forgeflow.ai.groq.api-key=` to your Groq key in `application.properties` (gitignored). Never put a real key in files that are committed.
-
-3. Start broker + database:
+2. Start broker + database:
 
 ```powershell
-cd ForgeFlow
-docker compose up -d
+docker compose up -d postgres rabbitmq redis
 ```
 
-4. Start the API:
+3. Start the API (Flyway runs here):
 
 ```powershell
-.\mvnw.cmd spring-boot:run
+.\mvnw.cmd -pl workflow-service -am spring-boot:run
 ```
 
-Wait for `Started ForgeFlowApplication`.
+4. In a second terminal, start the worker:
+
+```powershell
+.\mvnw.cmd -pl execution-worker -am spring-boot:run
+```
+
+Wait for `Started WorkflowServiceApplication` and `Started ExecutionWorkerApplication`.
+
+Set the Groq key in the environment when you call `/generate`. Do not commit the key.
+
+```powershell
+$env:GROQ_API_KEY="gsk_your_key"
+```
 
 RabbitMQ UI: http://localhost:15672 (`forgeflow` / `forgeflow`).
 
@@ -47,14 +58,16 @@ Base: `http://localhost:8080`
 | GET    | `/api/v1/workflows/jobs/{jobId}` | —                                                      |
 | POST   | `/api/v1/workflows/generate`     | `{"prompt":"send welcome email to user 42"}`           |
 
-Retry demo: execute with `"payload":"FORCE_FAIL"` until status `FAILED` and `attemptCount` is 3.
+Retry demo: execute with `"payload":"FORCE_FAIL"` until status `FAILED` and `attemptCount` is 3. The worker process logs the retries.
 
-## Docker (full stack)
+## Docker (both services)
 
 ```powershell
 $env:GROQ_API_KEY="gsk_your_key"
-docker compose --profile full up --build
+docker compose up --build
 ```
+
+The worker starts after `/hello` on the API is healthy, so Flyway has already created the tables.
 
 ## License
 

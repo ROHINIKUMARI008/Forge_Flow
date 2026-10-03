@@ -31,14 +31,22 @@ services:
       timeout: 5s
       retries: 5
 
-  # Optional: run the API in Docker after `docker compose up --build`
-  # Pass Groq: GROQ_API_KEY=gsk_xxx docker compose up --build
-  # App image: docker compose --profile full up --build
-  # Keep using .\mvnw.cmd spring-boot:run for daily work (profile off = only Rabbit + Postgres).
-  app:
-    profiles: ["full"]
-    build: .
-    container_name: forgeflow-app
+  redis:
+    image: redis:7-alpine
+    container_name: forgeflow-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  workflow-service:
+    build:
+      context: .
+      dockerfile: workflow-service/Dockerfile
+    container_name: forgeflow-workflow-service
     ports:
       - "8080:8080"
     environment:
@@ -47,11 +55,39 @@ services:
       SPRING_DATASOURCE_USERNAME: forgeflow
       SPRING_DATASOURCE_PASSWORD: forgeflow
       GROQ_API_KEY: ${GROQ_API_KEY:-}
+      REDIS_HOST: redis
     depends_on:
       rabbitmq:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  execution-worker:
+    build:
+      context: .
+      dockerfile: execution-worker/Dockerfile
+    container_name: forgeflow-execution-worker
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/forgeflow
+      SPRING_DATASOURCE_USERNAME: forgeflow
+      SPRING_DATASOURCE_PASSWORD: forgeflow
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      workflow-service:
+        condition: service_healthy
+    restart: on-failure
 
 volumes:
   forgeflow-postgres-data:
